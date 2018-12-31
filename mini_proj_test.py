@@ -9,13 +9,18 @@ from random import randint
 from skimage.measure import compare_ssim as ssim
 from keras.preprocessing import image
 from sklearn import svm,metrics
+from sklearn.model_selection import cross_val_score, cross_val_predict
+from keras.utils import np_utils
+from keras.models import Sequential
+from keras.layers import Dense, Conv2D, MaxPooling2D, Dropout, Flatten
 import matplotlib.pyplot as plt
 
 # PATH TO ALL IMAGES
-global basedir, image_paths, target_size
+global basedir, image_paths, target_size, img_size
 basedir = 'C:\\Users\\TheoV\\PycharmProjects\\untitled\\venv\\dataset'
 images_dir = os.path.join(basedir,'celeba')
 labels_filename = os.path.join(basedir,'attribute_list.csv')
+img_size = 64
 
 image_paths = [os.path.join(images_dir, l) for l in os.listdir(images_dir)]
 target_size = None
@@ -127,6 +132,31 @@ def get_datasets(saveimg, imglabels, trainval = 0.8, testval = 0.2, valid = Fals
         Y_test = imglabels[shuffledidx[trainlen:]]
         return X_train, X_test, Y_train, Y_test
 
+
+def createModel():
+    model = Sequential()
+    model.add(Conv2D(32, (3, 3), padding='same', activation='relu', input_shape=(img_size,img_size,3)))
+    # model.add(Conv2D(32, (3, 3), activation='relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Dropout(0.25))
+
+    model.add(Conv2D(64, (3, 3), padding='same', activation='relu'))
+    # model.add(Conv2D(64, (3, 3), activation='relu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Dropout(0.25))
+
+    # model.add(Conv2D(64, (3, 3), padding='same', activation='relu'))
+    # model.add(Conv2D(64, (3, 3), activation='relu'))
+    # model.add(MaxPooling2D(pool_size=(2, 2)))
+    # model.add(Dropout(0.25))
+
+    model.add(Flatten())
+    model.add(Dense(512, activation='relu'))
+    model.add(Dropout(0.5))
+    model.add(Dense(2, activation='softmax'))
+
+    return model
+
 #=======================================================================================================================
 #Open all images and save values
 if os.path.isfile(os.path.join(basedir,"saveimg.npy")) :
@@ -134,8 +164,8 @@ if os.path.isfile(os.path.join(basedir,"saveimg.npy")) :
     saveimgcolor = np.load(os.path.join(basedir, "saveimgcolor.npy"))
     print("image array loaded")
 elif os.path.isdir(images_dir) :
-    saveimg = np.empty([5000, 256, 256], dtype=np.uint8)
-    saveimgcolor = np.empty([5000, 256, 256, 3], dtype=np.uint8)
+    saveimg = np.empty([5000, img_size, img_size], dtype=np.uint8)
+    saveimgcolor = np.empty([5000, img_size, img_size, 3], dtype=np.uint8)
     for img_path in image_paths:
         file_name = img_path.split('.')[0].split('\\')[-1]
         # load image
@@ -143,12 +173,13 @@ elif os.path.isdir(images_dir) :
             image.load_img(img_path,
                            target_size=target_size,
                            interpolation='bicubic'))
+        img = cv2.resize(img, (img_size, img_size))
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         saveimg[int(file_name)-1] =  gray     #save gray img pixel values to array for later processing
         saveimgcolor[int(file_name)-1] =  img
     saveimg = saveimg.astype(np.uint8)  #convert img to uint8, useful for imshow
     np.save(os.path.join(basedir,"saveimg"),saveimg)
-    saveimg = saveimgcolor.astype(np.uint8)  # convert img to uint8, useful for imshow
+    saveimgcolor = saveimgcolor.astype(np.uint8)  # convert img to uint8, useful for imshow
     np.save(os.path.join(basedir, "saveimgcolor"), saveimgcolor)
     print("image array storing done")
 else :
@@ -169,6 +200,7 @@ else :
         counter = 1;
         for row in labelscsv:
             if counter >= 3 : # ignore headers for csv file
+                currlabel = np.append(int(row[0]),row[1:])
                 imglabels[int(row[0])-1,:] = (row[1:])
             if row[len(row)-1] == "-1":
                 humanbinar = np.append(humanbinar, float(row[0]))
@@ -186,8 +218,11 @@ if not os.path.isdir(os.path.join(basedir, "outliers")):
 #tests with different methods for face detection: SSIM, HAAR cascade and HOG => HOG seems most accurate with acc = 95%
 
 outliers_real = np.sort(get_real_outliers(imglabels))
-
-outliers_pred_frontal = np.sort(face_detect_gffd(saveimg))
+if os.path.isfile(os.path.join(basedir,"outliers.npy")) :
+    outliers_pred_frontal = np.load(os.path.join(basedir, "outliers.npy"))
+else :
+    outliers_pred_frontal = np.sort(face_detect_gffd(saveimg))
+    np.save(os.path.join(basedir, "outliers"), outliers_pred_frontal)
 saveimg_gffd = np.delete(saveimg, [x-1 for x in outliers_pred_frontal], axis=0)
 saveimgcolor_gffd = np.delete(saveimgcolor, [x-1 for x in outliers_pred_frontal], axis=0)
 imglabels_gffd = np.delete(imglabels, [x-1 for x in outliers_pred_frontal], axis=0)
@@ -206,31 +241,56 @@ accuracy_comp(outliers_real,outliers_pred_frontal,np.arange(1,len(imglabels)+1))
 
 #=======================================================================================================================
 #Task B dataset split to determine training set, testing set and if needed validation set
-X_train, X_test, Y_train, Y_test = get_datasets(saveimg_gffd,imglabels_gffd)
+X_train, X_test, Y_train, Y_test, = get_datasets(saveimg_gffd,imglabels_gffd)
+X_train_CNN, X_test_CNN, X_valid_CNN, Y_train_CNN, Y_test_CNN, Y_valid_CNN = get_datasets(saveimgcolor_gffd,imglabels_gffd, valid = True)
 X_train = np.reshape(X_train,(X_train.shape[0],X_train.shape[1]**2))
 X_test = np.reshape(X_test,(X_test.shape[0],X_test.shape[1]**2))
-
-print("length train set = ", X_train.shape)
-print("length test set = ", X_test.shape)
-print("length train labels = ", Y_train.shape)
-print("length test labels = ", Y_test.shape)
 #=======================================================================================================================
 
 #=======================================================================================================================
 #Task C : 3) Glasses detection
 #test with an SVM
-
-clf_rbf = svm.SVC(gamma='scale')
-clf_rbf.fit(X_train, Y_train[:,1])
-glasses = clf_rbf.predict(X_test)
-accur = metrics.balanced_accuracy_score(Y_test[:,1],glasses)
-confus = metrics.confusion_matrix(Y_test[:,1],glasses)
-print("accuracy = ", accur)             #29/12/2018 => accuracy = 0.5
+taskidx = 1     #glasses detection task
+print("creating SVM")
+clf = svm.SVC(kernel="poly", gamma='scale', degree=3)
+print("training SVM")
+clf.fit(X_train, Y_train[:,taskidx])
+print("making predictions")
+glasses = clf.predict(X_test)
+accur = metrics.balanced_accuracy_score(Y_test[:,taskidx],glasses)
+glasses_kfold = cross_val_predict(clf, X_test, Y_test[:,taskidx], cv=3)
+scores = cross_val_score(clf, X_test, Y_test[:,taskidx], cv=3)
+confus = metrics.confusion_matrix(Y_test[:,taskidx],glasses)
+print("accuracy before cross validation = ", accur)             #31/12/2018 => accuracy = 0.81
 print("confusion matrix : \n", confus)
+print("mean accuracy after cross validation = ", scores.mean())
+print("test accuracy after cross validation = ", metrics.balanced_accuracy_score(Y_test[:,taskidx],glasses_kfold))
 stoptime = timeit.default_timer()
-print("exec time = ", stoptime-starttime)   #overall exec time = 24 minutes, way too long for one single task
+print("exec time = ", stoptime-starttime)
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# test with a CNN
+print("CNN model creation")
+model1 = createModel()
+print("CNN model done")
+batch_size = 30
+epochs = 3
+model1.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['accuracy'])
+
+nb_classes = np.max(Y_train_CNN[:,taskidx].astype(int)) + 1
+Y_train_CNN = np_utils.to_categorical(Y_train_CNN[:,taskidx], nb_classes)
+Y_valid_CNN = np_utils.to_categorical(Y_valid_CNN[:,taskidx], nb_classes)
+Y_test_CNN = np_utils.to_categorical(Y_test_CNN[:,taskidx], nb_classes)
+history = model1.fit(X_train_CNN, Y_train_CNN, batch_size=batch_size, epochs=epochs, verbose=1, validation_data=(X_valid_CNN, Y_valid_CNN))
+print("CNN model evaluation")
+glasses_CNN  = model1.predict(X_test_CNN)       #model returns always the same label, array is 2-by-N first col is 0s second col is 1s
+model1.evaluate(X_test_CNN, Y_test_CNN)
+accur = metrics.balanced_accuracy_score(Y_test_CNN[:,taskidx],glasses_CNN)
+confus = metrics.confusion_matrix(Y_test_CNN[:,taskidx],glasses_CNN)
+print("accuracy = ", accur)
+print("confusion matrix : \n", confus)
+stoptime = timeit.default_timer()
+print("exec time = ", stoptime-starttime)
 
 
 
