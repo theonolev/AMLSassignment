@@ -13,6 +13,7 @@ from sklearn.model_selection import cross_val_score, cross_val_predict
 from keras.utils import np_utils
 from keras.models import Sequential
 from keras.layers import Dense, Conv2D, MaxPooling2D, Dropout, Flatten
+from keras.layers.advanced_activations import LeakyReLU
 import matplotlib.pyplot as plt
 
 # PATH TO ALL IMAGES
@@ -77,7 +78,7 @@ def face_detect_haar(saveimg) :
 def get_real_outliers(imglabels) :
     outliers_real = np.array([])
     for imgidx in range(len(imglabels)):
-        if np.array_equal(imglabels[imgidx, 0:],[-1, -1, -1, -1, -1]):
+        if np.array_equal(imglabels[imgidx, 1:],[-1, -1, -1, -1, -1]):
             outliers_real = np.append(outliers_real, imgidx + 1)
     return outliers_real
 
@@ -157,6 +158,34 @@ def createModel():
 
     return model
 
+
+def SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx) :
+    print("\nstarting task %i with SVM" % (filetaskidx))
+    print("creating SVM")
+    clf = svm.SVC(kernel="poly", gamma='scale', degree=3)
+    print("training SVM")
+    clf.fit(X_train, Y_train[:, taskidx])
+    print("making predictions")
+    predic = clf.predict(X_test)
+    accur = metrics.balanced_accuracy_score(Y_test[:, taskidx], predic)
+    # predic_kfold = cross_val_predict(clf, X_test, Y_test[:, taskidx], cv=3)
+    # scores = cross_val_score(clf, X_test, Y_test[:, taskidx], cv=3)
+    confus = metrics.confusion_matrix(Y_test[:, taskidx], predic)
+    print("accuracy before cross validation = ", accur)  # 31/12/2018 => accuracy = 0.81
+    print("confusion matrix : \n", confus)
+    # print("mean accuracy after cross validation = ", scores.mean())
+    # print("test accuracy after cross validation = ", metrics.balanced_accuracy_score(Y_test[:, taskidx], predic_kfold))
+    stoptime = timeit.default_timer()
+    print("exec time = ", stoptime - starttime)
+    csvtitle = "task_%i.csv" % (filetaskidx)
+    with open(os.path.join(basedir, csvtitle), 'w', newline='') as myfile:
+        wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+        wr.writerow(["average inference accuracy = %f" % (accur)])
+        for idx in range(len(Y_test)):
+            row = zip(["%i.png" % (Y_test[idx, 0].astype(int))], [predic[idx].astype(int)])
+            wr.writerows(row)
+
+
 #=======================================================================================================================
 #Open all images and save values
 if os.path.isfile(os.path.join(basedir,"saveimg.npy")) :
@@ -189,21 +218,21 @@ else :
 if os.path.isfile(os.path.join(basedir,"imglabels.npy")) :
     imglabels = np.load(os.path.join(basedir,"imglabels.npy"))
     print("labels loaded")
-    for row in imglabels :
-        if row[len(row) - 1] == "-1":
-            humanbinar = np.append(humanbinar, float(row[0]))
+    # for row in imglabels :
+    #     if row[len(row) - 1] == "-1":
+    #         humanbinar = np.append(humanbinar, float(row[0]))
 else :
     with open(labels_filename,'r') as csvfile:
         labelscsv = csv.reader(csvfile, delimiter=',')
-        humanbinar = np.array([])
-        imglabels = np.zeros([5000, 5])
+        # humanbinar = np.array([])
+        imglabels = np.zeros([5000, 6])
         counter = 1;
         for row in labelscsv:
             if counter >= 3 : # ignore headers for csv file
                 currlabel = np.append(int(row[0]),row[1:])
-                imglabels[int(row[0])-1,:] = (row[1:])
-            if row[len(row)-1] == "-1":
-                humanbinar = np.append(humanbinar, float(row[0]))
+                imglabels[int(row[0])-1,:] = currlabel
+            # if row[len(row)-1] == "-1":
+            #     humanbinar = np.append(humanbinar, float(row[0]))
             counter += 1
         imglabels.astype(int)
         np.save(os.path.join(basedir,"imglabels.npy"),imglabels)
@@ -231,7 +260,7 @@ imglabels_gffd = np.delete(imglabels, [x-1 for x in outliers_pred_frontal], axis
 # outliers_pred_haar = np.sort(face_detect_haar(saveimg))
 # outliers_pred_ssim = np.sort(face_detect_ssim(saveimg,meanimg))
 
-print("\n gffd accuracy:")
+print("\ngffd accuracy:")
 accuracy_comp(outliers_real,outliers_pred_frontal,np.arange(1,len(imglabels)+1))
 # print("\n ssim accuracy:")
 # accuracy_comp(outliers_real,outliers_pred_ssim,np.arange(1,len(imglabels)+1))
@@ -248,25 +277,23 @@ X_test = np.reshape(X_test,(X_test.shape[0],X_test.shape[1]**2))
 #=======================================================================================================================
 
 #=======================================================================================================================
-#Task C : 3) Glasses detection
-#test with an SVM
-taskidx = 1     #glasses detection task
-print("creating SVM")
-clf = svm.SVC(kernel="poly", gamma='scale', degree=3)
-print("training SVM")
-clf.fit(X_train, Y_train[:,taskidx])
-print("making predictions")
-glasses = clf.predict(X_test)
-accur = metrics.balanced_accuracy_score(Y_test[:,taskidx],glasses)
-glasses_kfold = cross_val_predict(clf, X_test, Y_test[:,taskidx], cv=3)
-scores = cross_val_score(clf, X_test, Y_test[:,taskidx], cv=3)
-confus = metrics.confusion_matrix(Y_test[:,taskidx],glasses)
-print("accuracy before cross validation = ", accur)             #31/12/2018 => accuracy = 0.81
-print("confusion matrix : \n", confus)
-print("mean accuracy after cross validation = ", scores.mean())
-print("test accuracy after cross validation = ", metrics.balanced_accuracy_score(Y_test[:,taskidx],glasses_kfold))
-stoptime = timeit.default_timer()
-print("exec time = ", stoptime-starttime)
+#Task C
+#tests with an SVM
+taskidx = 2     #glasses detection task
+filetaskidx = 3
+SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx)
+
+taskidx = 3     # emotion recognition task
+filetaskidx = 1
+SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx)
+
+taskidx = 4     # age identification task
+filetaskidx = 2
+SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx)
+
+taskidx = 5     # human detection task
+filetaskidx = 4
+SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx)
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # test with a CNN
@@ -277,16 +304,22 @@ batch_size = 30
 epochs = 3
 model1.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['accuracy'])
 
-nb_classes = np.max(Y_train_CNN[:,taskidx].astype(int)) + 1
-Y_train_CNN = np_utils.to_categorical(Y_train_CNN[:,taskidx], nb_classes)
-Y_valid_CNN = np_utils.to_categorical(Y_valid_CNN[:,taskidx], nb_classes)
-Y_test_CNN = np_utils.to_categorical(Y_test_CNN[:,taskidx], nb_classes)
-history = model1.fit(X_train_CNN, Y_train_CNN, batch_size=batch_size, epochs=epochs, verbose=1, validation_data=(X_valid_CNN, Y_valid_CNN))
-print("CNN model evaluation")
-glasses_CNN  = model1.predict(X_test_CNN)       #model returns always the same label, array is 2-by-N first col is 0s second col is 1s
-model1.evaluate(X_test_CNN, Y_test_CNN)
-accur = metrics.balanced_accuracy_score(Y_test_CNN[:,taskidx],glasses_CNN)
-confus = metrics.confusion_matrix(Y_test_CNN[:,taskidx],glasses_CNN)
+nb_classes = np.max(Y_train_CNN[:,taskidx].astype(int)+1)
+Y_train_CNN_task = Y_train_CNN[:,taskidx].clip(min=0)
+Y_valid_CNN_task = Y_valid_CNN[:,taskidx].clip(min=0)
+Y_test_CNN_task = Y_test_CNN[:,taskidx].clip(min=0)
+
+Y_train_CNN_task = np_utils.to_categorical(Y_train_CNN_task, nb_classes)
+Y_valid_CNN_task = np_utils.to_categorical(Y_valid_CNN_task, nb_classes)
+Y_test_CNN_task = np_utils.to_categorical(Y_test_CNN_task, nb_classes)
+history = model1.fit(X_train_CNN, Y_train_CNN_task, batch_size=batch_size, epochs=epochs, verbose=1, validation_data=(X_valid_CNN, Y_valid_CNN_task))
+print("\nCNN model evaluation")
+predic_CNN  = model1.predict(X_test_CNN)       #model returns always the same label, array is 2-by-N first col is 1s second col is 0s
+mod_eval = model1.evaluate(X_test_CNN, Y_test_CNN_task)
+eval_accur = mod_eval[1]
+
+accur = metrics.balanced_accuracy_score(Y_test_CNN[:,taskidx].clip(min=0),predic_CNN)
+confus = metrics.confusion_matrix(Y_test_CNN[:,taskidx].clip(min=0),predic_CNN)
 print("accuracy = ", accur)
 print("confusion matrix : \n", confus)
 stoptime = timeit.default_timer()
