@@ -157,7 +157,7 @@ def createModel(multiclass = False):
     if multiclass :
         model.add(Dense(7, activation='softmax'))
     else:
-        model.add(Dense(3, activation='softmax'))
+        model.add(Dense(2, activation='softmax'))
 
     return model
 
@@ -201,12 +201,14 @@ def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN,
     epochs = 3
     model1.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['accuracy'])
 
-    nb_classes = np.max(Y_train_CNN[:, taskidx].astype(int) + 2)
+
     if filetaskidx != 5 :
+        nb_classes = np.max(Y_train_CNN[:, taskidx].astype(int)) + 1
         Y_train_CNN_task = Y_train_CNN[:,taskidx].clip(min=0)
         Y_valid_CNN_task = Y_valid_CNN[:,taskidx].clip(min=0)
         Y_test_CNN_task = Y_test_CNN[:,taskidx].clip(min=0)
     else :
+        nb_classes = np.max(Y_train_CNN[:, taskidx].astype(int)) + 2
         Y_train_CNN_task = Y_train_CNN[:, taskidx] + 1
         Y_valid_CNN_task = Y_valid_CNN[:, taskidx] + 1
         Y_test_CNN_task = Y_test_CNN[:, taskidx] + 1
@@ -222,7 +224,7 @@ def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN,
     history = model1.fit(X_train_CNN, Y_train_CNN_task, batch_size=batch_size, epochs=epochs, verbose=1,
                          validation_data=(X_valid_CNN, Y_valid_CNN_task))
     print("\nCNN model evaluation")
-    predic_CNN = model1.predict(X_test_CNN)  
+    predic_CNN = model1.predict(X_test_CNN)
     if filetaskidx != 5:
         predic_CNN = np.asarray([np.argmax(y, axis=None, out=None) for y in predic_CNN]) - 1
     else :
@@ -235,6 +237,14 @@ def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN,
     print("confusion matrix : \n", confus)
     stoptime = timeit.default_timer()
     print("exec time = ", stoptime - starttime)
+
+    csvtitle = "task_%i.csv" % (filetaskidx)
+    with open(os.path.join(basedir, csvtitle), 'w', newline='') as myfile:
+        wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
+        wr.writerow(["average inference accuracy = %f" % (eval_accur)])
+        for idx in range(len(Y_test_CNN)):
+            row = zip(["%i.png" % (Y_test_CNN[idx, 0].astype(int))], [predic_CNN[idx].astype(int)])
+            wr.writerows(row)
 
 #=======================================================================================================================
 #Open all images and save values
@@ -268,21 +278,15 @@ else :
 if os.path.isfile(os.path.join(basedir,"imglabels.npy")) :
     imglabels = np.load(os.path.join(basedir,"imglabels.npy"))
     print("labels loaded")
-    # for row in imglabels :
-    #     if row[len(row) - 1] == "-1":
-    #         humanbinar = np.append(humanbinar, float(row[0]))
 else :
     with open(labels_filename,'r') as csvfile:
         labelscsv = csv.reader(csvfile, delimiter=',')
-        # humanbinar = np.array([])
         imglabels = np.zeros([5000, 6])
         counter = 1;
         for row in labelscsv:
             if counter >= 3 : # ignore headers for csv file
                 currlabel = np.append(int(row[0]),row[1:])
                 imglabels[int(row[0])-1,:] = currlabel
-            # if row[len(row)-1] == "-1":
-            #     humanbinar = np.append(humanbinar, float(row[0]))
             counter += 1
         imglabels.astype(int)
         np.save(os.path.join(basedir,"imglabels.npy"),imglabels)
@@ -351,10 +355,6 @@ SVM_solve_task(np.reshape(X_train_CNN,(X_train_CNN.shape[0],(X_train_CNN.shape[1
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # test with a CNN
-# taskidx = 2     #glasses detection task
-# filetaskidx = 3
-# CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN, Y_valid_CNN,taskidx, filetaskidx)
-
 taskidx = 1
 filetaskidx = 5
 CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN, Y_valid_CNN,taskidx, filetaskidx)
