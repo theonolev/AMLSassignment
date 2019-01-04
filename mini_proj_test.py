@@ -17,7 +17,7 @@ from keras.layers.advanced_activations import LeakyReLU
 import matplotlib.pyplot as plt
 
 # PATH TO ALL IMAGES
-global basedir, image_paths, target_size, img_size
+global basedir, image_paths, target_size, img_size, starttime
 basedir = 'C:\\Users\\TheoV\\PycharmProjects\\untitled\\venv\\dataset'
 images_dir = os.path.join(basedir,'celeba')
 labels_filename = os.path.join(basedir,'attribute_list.csv')
@@ -25,8 +25,8 @@ img_size = 64
 
 image_paths = [os.path.join(images_dir, l) for l in os.listdir(images_dir)]
 target_size = None
-
 starttime = timeit.default_timer()
+
 def face_detect_gffd(saveimg):
     print("starting gffd detection")
     start = timeit.default_timer()
@@ -134,7 +134,7 @@ def get_datasets(saveimg, imglabels, trainval = 0.8, testval = 0.2, valid = Fals
         return X_train, X_test, Y_train, Y_test
 
 
-def createModel():
+def createModel(multiclass = False):
     model = Sequential()
     model.add(Conv2D(32, (3, 3), padding='same', activation='relu', input_shape=(img_size,img_size,3)))
     # model.add(Conv2D(32, (3, 3), activation='relu'))
@@ -154,7 +154,10 @@ def createModel():
     model.add(Flatten())
     model.add(Dense(512, activation='relu'))
     model.add(Dropout(0.5))
-    model.add(Dense(2, activation='softmax'))
+    if multiclass :
+        model.add(Dense(7, activation='softmax'))
+    else:
+        model.add(Dense(3, activation='softmax'))
 
     return model
 
@@ -168,13 +171,13 @@ def SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx) :
     print("making predictions")
     predic = clf.predict(X_test)
     accur = metrics.balanced_accuracy_score(Y_test[:, taskidx], predic)
-    # predic_kfold = cross_val_predict(clf, X_test, Y_test[:, taskidx], cv=3)
-    # scores = cross_val_score(clf, X_test, Y_test[:, taskidx], cv=3)
+    predic_kfold = cross_val_predict(clf, X_test, Y_test[:, taskidx], cv=3)
+    scores = cross_val_score(clf, X_test, Y_test[:, taskidx], cv=3)
     confus = metrics.confusion_matrix(Y_test[:, taskidx], predic)
     print("accuracy before cross validation = ", accur)  # 31/12/2018 => accuracy = 0.81
     print("confusion matrix : \n", confus)
-    # print("mean accuracy after cross validation = ", scores.mean())
-    # print("test accuracy after cross validation = ", metrics.balanced_accuracy_score(Y_test[:, taskidx], predic_kfold))
+    print("mean accuracy after cross validation = ", scores.mean())
+    print("test accuracy after cross validation = ", metrics.balanced_accuracy_score(Y_test[:, taskidx], predic_kfold))
     stoptime = timeit.default_timer()
     print("exec time = ", stoptime - starttime)
     csvtitle = "task_%i.csv" % (filetaskidx)
@@ -185,6 +188,53 @@ def SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx) :
             row = zip(["%i.png" % (Y_test[idx, 0].astype(int))], [predic[idx].astype(int)])
             wr.writerows(row)
 
+
+def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN, Y_valid_CNN,taskidx, filetaskidx) :
+    # taskidx = 1
+    print("CNN model creation")
+    if filetaskidx != 5:
+        model1 = createModel()
+    else :
+        model1 = createModel(multiclass = True)
+    print("CNN model done")
+    batch_size = 60
+    epochs = 3
+    model1.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['accuracy'])
+
+    nb_classes = np.max(Y_train_CNN[:, taskidx].astype(int) + 2)
+    if filetaskidx != 5 :
+        Y_train_CNN_task = Y_train_CNN[:,taskidx].clip(min=0)
+        Y_valid_CNN_task = Y_valid_CNN[:,taskidx].clip(min=0)
+        Y_test_CNN_task = Y_test_CNN[:,taskidx].clip(min=0)
+    else :
+        Y_train_CNN_task = Y_train_CNN[:, taskidx] + 1
+        Y_valid_CNN_task = Y_valid_CNN[:, taskidx] + 1
+        Y_test_CNN_task = Y_test_CNN[:, taskidx] + 1
+
+    # normalize image colour values (from range 0-255 to range 0-1) so it doesn't kill weight in the activation layers
+    X_train_CNN = X_train_CNN / 255
+    X_test_CNN = X_test_CNN / 255
+    X_valid_CNN = X_valid_CNN / 255
+
+    Y_train_CNN_task = np_utils.to_categorical(Y_train_CNN_task, nb_classes)
+    Y_valid_CNN_task = np_utils.to_categorical(Y_valid_CNN_task, nb_classes)
+    Y_test_CNN_task = np_utils.to_categorical(Y_test_CNN_task, nb_classes)
+    history = model1.fit(X_train_CNN, Y_train_CNN_task, batch_size=batch_size, epochs=epochs, verbose=1,
+                         validation_data=(X_valid_CNN, Y_valid_CNN_task))
+    print("\nCNN model evaluation")
+    predic_CNN = model1.predict(X_test_CNN)  
+    if filetaskidx != 5:
+        predic_CNN = np.asarray([np.argmax(y, axis=None, out=None) for y in predic_CNN]) - 1
+    else :
+        predic_CNN = np.asarray([np.argmax(y, axis=None, out=None) for y in predic_CNN])
+    mod_eval = model1.evaluate(X_test_CNN, Y_test_CNN_task)
+    eval_accur = mod_eval[1]
+
+    confus = metrics.confusion_matrix(Y_test_CNN[:, taskidx], predic_CNN)
+    print("accuracy = ", eval_accur)
+    print("confusion matrix : \n", confus)
+    stoptime = timeit.default_timer()
+    print("exec time = ", stoptime - starttime)
 
 #=======================================================================================================================
 #Open all images and save values
@@ -295,35 +345,20 @@ taskidx = 5     # human detection task
 filetaskidx = 4
 SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx)
 
+taskidx = 1     # hair color task
+filetaskidx = 5
+SVM_solve_task(np.reshape(X_train_CNN,(X_train_CNN.shape[0],(X_train_CNN.shape[1]**2)*3)), np.reshape(X_test_CNN,(X_test_CNN.shape[0],(X_test_CNN.shape[1]**2)*3)), Y_train_CNN, Y_test_CNN, taskidx, filetaskidx)
+
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # test with a CNN
-print("CNN model creation")
-model1 = createModel()
-print("CNN model done")
-batch_size = 30
-epochs = 3
-model1.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['accuracy'])
+# taskidx = 2     #glasses detection task
+# filetaskidx = 3
+# CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN, Y_valid_CNN,taskidx, filetaskidx)
 
-nb_classes = np.max(Y_train_CNN[:,taskidx].astype(int)+1)
-Y_train_CNN_task = Y_train_CNN[:,taskidx].clip(min=0)
-Y_valid_CNN_task = Y_valid_CNN[:,taskidx].clip(min=0)
-Y_test_CNN_task = Y_test_CNN[:,taskidx].clip(min=0)
+taskidx = 1
+filetaskidx = 5
+CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN, Y_valid_CNN,taskidx, filetaskidx)
 
-Y_train_CNN_task = np_utils.to_categorical(Y_train_CNN_task, nb_classes)
-Y_valid_CNN_task = np_utils.to_categorical(Y_valid_CNN_task, nb_classes)
-Y_test_CNN_task = np_utils.to_categorical(Y_test_CNN_task, nb_classes)
-history = model1.fit(X_train_CNN, Y_train_CNN_task, batch_size=batch_size, epochs=epochs, verbose=1, validation_data=(X_valid_CNN, Y_valid_CNN_task))
-print("\nCNN model evaluation")
-predic_CNN  = model1.predict(X_test_CNN)       #model returns always the same label, array is 2-by-N first col is 1s second col is 0s
-mod_eval = model1.evaluate(X_test_CNN, Y_test_CNN_task)
-eval_accur = mod_eval[1]
-
-accur = metrics.balanced_accuracy_score(Y_test_CNN[:,taskidx].clip(min=0),predic_CNN)
-confus = metrics.confusion_matrix(Y_test_CNN[:,taskidx].clip(min=0),predic_CNN)
-print("accuracy = ", accur)
-print("confusion matrix : \n", confus)
-stoptime = timeit.default_timer()
-print("exec time = ", stoptime-starttime)
 
 
 
