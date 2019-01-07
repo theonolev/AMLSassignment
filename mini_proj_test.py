@@ -14,6 +14,7 @@ from keras.utils import np_utils
 from keras.models import Sequential
 from keras.layers import Dense, Conv2D, MaxPooling2D, Dropout, Flatten
 from keras.layers.advanced_activations import LeakyReLU
+from keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
 
 # PATH TO ALL IMAGES
@@ -99,7 +100,7 @@ def get_mean_img(saveimg):
 
 def accuracy_comp(real,pred,labels) :
     # helper function used to compute the accuracy of the different methods for face detection implemented in task A
-    truenegarray = [x for x in real if x in pred]   
+    truenegarray = [x for x in real if x in pred]
     trueposarray = [x for x in np.arange(1,len(labels)+1) if x not in real and x not in pred]
     falsenegarray = [x for x in pred if x not in real]
     falseposarray = [x for x in real if x not in pred]
@@ -154,10 +155,10 @@ def createModel(multiclass = False):
 
 
     model.add(Flatten())        #flattening the output of the previous layer to feed it to the fully connected layers
-    model.add(Dense(512, activation='relu'))    
+    model.add(Dense(512, activation='relu'))
     model.add(Dropout(0.5))
     if multiclass :     #output of the fully connected layers using softmax to define 1 class only to be labelled 1
-        model.add(Dense(7, activation='softmax'))   
+        model.add(Dense(7, activation='softmax'))
     else:
         model.add(Dense(2, activation='softmax'))
 
@@ -201,9 +202,10 @@ def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN,
     batch_size = 200
     epochs = 50
     model1.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])      #compiles the CNN by assigning it with weights, optimizer and loss functions
+    earlystop = EarlyStopping(monitor='val_acc', min_delta=0.00001, patience = 7 , restore_best_weights=True)     #sets a stopping criterion
+    callbacks_list = [earlystop]
 
-
-    if filetaskidx != 5 :       
+    if filetaskidx != 5 :
         nb_classes = np.max(Y_train_CNN[:, taskidx].astype(int)) + 1
         Y_train_CNN_task = Y_train_CNN[:,taskidx].clip(min=0)
         Y_valid_CNN_task = Y_valid_CNN[:,taskidx].clip(min=0)
@@ -222,7 +224,7 @@ def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN,
     Y_train_CNN_task = np_utils.to_categorical(Y_train_CNN_task, nb_classes)
     Y_valid_CNN_task = np_utils.to_categorical(Y_valid_CNN_task, nb_classes)
     Y_test_CNN_task = np_utils.to_categorical(Y_test_CNN_task, nb_classes)
-    history = model1.fit(X_train_CNN, Y_train_CNN_task, batch_size=batch_size, epochs=epochs, verbose=1,
+    history = model1.fit(X_train_CNN, Y_train_CNN_task, batch_size=batch_size, epochs=epochs, callbacks=callbacks_list, verbose=1,
                          validation_data=(X_valid_CNN, Y_valid_CNN_task))       #trains the CNN
     print("\nCNN model evaluation")
     predic_CNN = model1.predict(X_test_CNN)     #get prediction on unknown data
