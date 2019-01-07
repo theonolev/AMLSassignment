@@ -18,13 +18,17 @@ from keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
 
 # PATH TO ALL IMAGES
-global basedir, image_paths, target_size, img_size, starttime
-basedir = 'C:\\Users\\TheoV\\PycharmProjects\\untitled\\venv\\dataset'
+global basedir, image_paths, target_size, img_size, starttime, testimage_paths
+basedir = os.path.dirname(os.path.abspath(__file__))
+basedir = os.path.join(basedir,'dataset')
+print(basedir)
 images_dir = os.path.join(basedir,'celeba')
+testimages_dir = os.path.join(basedir,'testing_dataset')
 labels_filename = os.path.join(basedir,'attribute_list.csv')
 img_size = 64
 
 image_paths = [os.path.join(images_dir, l) for l in os.listdir(images_dir)]
+testimage_paths = [os.path.join(testimages_dir, l) for l in os.listdir(testimages_dir)]
 target_size = None
 starttime = timeit.default_timer()
 
@@ -165,7 +169,7 @@ def createModel(multiclass = False):
     return model
 
 
-def SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx) :
+def SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx, testimg) :
     #  helper function called to create, train the SVM with the training set, and use test set to compute the accuracy
     print("\nstarting task %i with SVM" % (filetaskidx))
     print("creating SVM")
@@ -181,17 +185,19 @@ def SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx) :
     stoptime = timeit.default_timer()
     print("exec time = ", stoptime - starttime)
 
+    predic = clf.predict(testimg)  # get prediction on unknown data
+
     # create CSV file
     csvtitle = "task_%i.csv" % (filetaskidx)
     with open(os.path.join(basedir, csvtitle), 'w', newline='') as myfile:
         wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
         wr.writerow(["average inference accuracy = %f" % (accur)])
-        for idx in range(len(Y_test)):
-            row = zip(["%i.png" % (Y_test[idx, 0].astype(int))], [predic[idx].astype(int)])
+        for idx in range(len(predic)):
+            row = zip(["%i.png" % (idx+1)], [predic[idx].astype(int)])
             wr.writerows(row)
 
 
-def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN, Y_valid_CNN,taskidx, filetaskidx) :
+def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN, Y_valid_CNN,taskidx, filetaskidx, testimgcolor) :
     #  helper function called to create, compile and train the CNN with the training and validation sets, and plot the accuracy and loss functions
     print("CNN model creation")
     if filetaskidx != 5:            #creates the CNN by stacking up the required layers
@@ -220,6 +226,7 @@ def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN,
     X_train_CNN = X_train_CNN / 255
     X_test_CNN = X_test_CNN / 255
     X_valid_CNN = X_valid_CNN / 255
+    testimgcolor = testimgcolor / 255
 
     Y_train_CNN_task = np_utils.to_categorical(Y_train_CNN_task, nb_classes)
     Y_valid_CNN_task = np_utils.to_categorical(Y_valid_CNN_task, nb_classes)
@@ -261,24 +268,36 @@ def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN,
     plt.title('Accuracy Curves', fontsize=16)
     plt.show()
 
+    predic_CNN = model1.predict(testimgcolor)  # get prediction on unknown data
+    if filetaskidx != 5:
+        predic_CNN = np.asarray([np.argmax(y, axis=None, out=None) for y in predic_CNN]) - 1
+    else:
+        predic_CNN = np.asarray([np.argmax(y, axis=None, out=None) for y in predic_CNN])
+
     #create CSV file
     csvtitle = "task_%i.csv" % (filetaskidx)
     with open(os.path.join(basedir, csvtitle), 'w', newline='') as myfile:
         wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
         wr.writerow(["average inference accuracy = %f" % (eval_accur)])
-        for idx in range(len(Y_test_CNN)):
-            row = zip(["%i.png" % (Y_test_CNN[idx, 0].astype(int))], [predic_CNN[idx].astype(int)])
+        for idx in range(len(predic_CNN)):
+            row = zip(["%i.png" % (idx+1)], [predic_CNN[idx].astype(int)])
             wr.writerows(row)
 
 #=======================================================================================================================
 #Open all images and save values
-if os.path.isfile(os.path.join(basedir,"saveimg.npy")) :
+if os.path.isfile(os.path.join(basedir,"saveimg.npy")) and os.path.isfile(os.path.join(basedir,"saveimgcolor.npy")) and os.path.isfile(os.path.join(basedir,"testimg.npy")) and os.path.isfile(os.path.join(basedir,"testimgcolor.npy")) :
     saveimg = np.load(os.path.join(basedir,"saveimg.npy"))
     saveimgcolor = np.load(os.path.join(basedir, "saveimgcolor.npy"))
+    testimg = np.load(os.path.join(basedir,"testimg.npy"))
+    testimgcolor = np.load(os.path.join(basedir, "testimgcolor.npy"))
+    #TODO : load testimg and testimgcolor
+
     print("image array loaded")
 elif os.path.isdir(images_dir) :
     saveimg = np.empty([5000, img_size, img_size], dtype=np.uint8)
     saveimgcolor = np.empty([5000, img_size, img_size, 3], dtype=np.uint8)
+    testimg = np.empty([100, img_size, img_size], dtype=np.uint8)
+    testimgcolor = np.empty([100, img_size, img_size, 3], dtype=np.uint8)
     for img_path in image_paths:
         file_name = img_path.split('.')[0].split('\\')[-1]
         # load image
@@ -294,6 +313,23 @@ elif os.path.isdir(images_dir) :
     np.save(os.path.join(basedir,"saveimg"),saveimg)
     saveimgcolor = saveimgcolor.astype(np.uint8)  # convert img to uint8, useful for imshow
     np.save(os.path.join(basedir, "saveimgcolor"), saveimgcolor)
+
+    for img_path in testimage_paths:
+        file_name = img_path.split('.')[0].split('\\')[-1]
+        # load image
+        img = image.img_to_array(
+            image.load_img(img_path,
+                           target_size=target_size,
+                           interpolation='bicubic'))
+        img = cv2.resize(img, (img_size, img_size))
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        testimg[int(file_name)-1] =  gray     #save gray img pixel values to array for later processing
+        testimgcolor[int(file_name)-1] =  img
+    testimg = testimg.astype(np.uint8)  #convert img to uint8, useful for imshow
+    np.save(os.path.join(basedir,"testimg"),testimg)
+    testimgcolor = testimgcolor.astype(np.uint8)  # convert img to uint8, useful for imshow
+    np.save(os.path.join(basedir, "testimgcolor"), testimgcolor)
+
     print("image array storing done")
 else :
     print("image folder not found")
@@ -352,6 +388,7 @@ X_train, X_test, Y_train, Y_test, = get_datasets(saveimg_gffd,imglabels_gffd)
 X_train_CNN, X_test_CNN, X_valid_CNN, Y_train_CNN, Y_test_CNN, Y_valid_CNN = get_datasets(saveimgcolor_gffd,imglabels_gffd, valid = True)
 X_train = np.reshape(X_train,(X_train.shape[0],X_train.shape[1]**2))
 X_test = np.reshape(X_test,(X_test.shape[0],X_test.shape[1]**2))
+testimg = np.reshape(testimg,(testimg.shape[0],testimg.shape[1]**2))
 #=======================================================================================================================
 
 #=======================================================================================================================
@@ -359,29 +396,29 @@ X_test = np.reshape(X_test,(X_test.shape[0],X_test.shape[1]**2))
 #tests with an SVM
 taskidx = 2     #glasses detection task
 filetaskidx = 3
-SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx)
+SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx, testimg)
 
 taskidx = 3     # emotion recognition task
 filetaskidx = 1
-SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx)
+SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx, testimg)
 
 taskidx = 4     # age identification task
 filetaskidx = 2
-SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx)
+SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx, testimg)
 
 taskidx = 5     # human detection task
 filetaskidx = 4
-SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx)
-
-taskidx = 1     # hair color task
-filetaskidx = 5
-SVM_solve_task(np.reshape(X_train_CNN,(X_train_CNN.shape[0],(X_train_CNN.shape[1]**2)*3)), np.reshape(X_test_CNN,(X_test_CNN.shape[0],(X_test_CNN.shape[1]**2)*3)), Y_train_CNN, Y_test_CNN, taskidx, filetaskidx)
+SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx, testimg)
+#
+# taskidx = 1     # hair color task
+# filetaskidx = 5
+# SVM_solve_task(np.reshape(X_train_CNN,(X_train_CNN.shape[0],(X_train_CNN.shape[1]**2)*3)), np.reshape(X_test_CNN,(X_test_CNN.shape[0],(X_test_CNN.shape[1]**2)*3)), Y_train_CNN, Y_test_CNN, taskidx, filetaskidx, testimgcolor)
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # test with a CNN
 taskidx = 1
 filetaskidx = 5
-CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN, Y_valid_CNN,taskidx, filetaskidx)
+CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN, Y_valid_CNN,taskidx, filetaskidx, testimgcolor)
 
 
 
