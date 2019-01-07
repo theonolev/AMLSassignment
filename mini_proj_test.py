@@ -28,6 +28,7 @@ target_size = None
 starttime = timeit.default_timer()
 
 def face_detect_gffd(saveimg):
+    # helper function to detect face if there is one in the picture, based on the HOG technique associated with a pretrained SVM pre implemented in the dlib library
     print("starting gffd detection")
     start = timeit.default_timer()
     outliers_pred = np.array([])
@@ -46,6 +47,7 @@ def face_detect_gffd(saveimg):
 
 
 def face_detect_ssim(saveimg,meanimg, thresh = 0.4):
+    # helper function to detect face if there is one in the picture, based on the structural similarity technique pre implemented in the skimage library
     print("starting ssim detection")
     start = timeit.default_timer()
     ssimarr = np.zeros([len(saveimg)])
@@ -61,13 +63,14 @@ def face_detect_ssim(saveimg,meanimg, thresh = 0.4):
 
 
 def face_detect_haar(saveimg) :
+    # helper function to detect face if there is one in the picture, based on the haar cascade technique pre implemented in the openCV library
     print("starting haar detection")
     start = timeit.default_timer()
     face_cascade = cv2.CascadeClassifier('C:\\Users\\TheoV\\PycharmProjects\\untitled\\venv\\Lib\\site-packages\\cv2\\data\\haarcascade_frontalface_default.xml')
     outliers_pred = np.array([])
 
     for imgidx in range(len(saveimg)):
-        facedetected = face_cascade.detectMultiScale(saveimg[imgidx], 1.3, 5)
+        facedetected = face_cascade.detectMultiScale(saveimg[imgidx], 1.1, 5)
         if type(facedetected)is tuple :
             outliers_pred = np.append(outliers_pred, imgidx+1)
     stop = timeit.default_timer()
@@ -76,6 +79,8 @@ def face_detect_haar(saveimg) :
 
 
 def get_real_outliers(imglabels) :
+    # find the outliers in the dataset from the labels (if every feature is labelled -1 then example is assumed to be an outlier)
+    # the output will be used to compute the accuracy of the face detection methods implemented for task A
     outliers_real = np.array([])
     for imgidx in range(len(imglabels)):
         if np.array_equal(imglabels[imgidx, 1:],[-1, -1, -1, -1, -1]):
@@ -93,7 +98,8 @@ def get_mean_img(saveimg):
 
 
 def accuracy_comp(real,pred,labels) :
-    truenegarray = [x for x in real if x in pred]
+    # helper function used to compute the accuracy of the different methods for face detection implemented in task A
+    truenegarray = [x for x in real if x in pred]   
     trueposarray = [x for x in np.arange(1,len(labels)+1) if x not in real and x not in pred]
     falsenegarray = [x for x in pred if x not in real]
     falseposarray = [x for x in real if x not in pred]
@@ -102,12 +108,13 @@ def accuracy_comp(real,pred,labels) :
     print("false positives = ", len(falseposarray))
     print("false negatives = ", len(falsenegarray))
     print("true positives = ", len(trueposarray))
-    accur = (len(truenegarray)+len(trueposarray))/(len(labels))*100
+    accur = (len(truenegarray)+len(trueposarray))/(len(labels))*100  # accuracy = (true pos + true neg)/overall number of examples
     print("accuracy = ", accur, "%")
     print("\n")
 
 
-def get_datasets(saveimg, imglabels, trainval = 0.8, testval = 0.2, valid = False):
+def get_datasets(saveimg, imglabels, trainval = 0.7, testval = 0.3, valid = False):
+    # helper function splitting the dataset into training, testing and if required validation set.
     shuffledidx = np.arange(len(imglabels))
     np.random.shuffle(shuffledidx)
 
@@ -135,27 +142,22 @@ def get_datasets(saveimg, imglabels, trainval = 0.8, testval = 0.2, valid = Fals
 
 
 def createModel(multiclass = False):
+    # helper function called to create the CNN model, untrained, by stacking up the different layers required
     model = Sequential()
-    model.add(Conv2D(32, (3, 3), padding='same', activation='relu', input_shape=(img_size,img_size,3)))
-    # model.add(Conv2D(32, (3, 3), activation='relu'))
+    model.add(Conv2D(5, (3, 3), padding='same', activation='relu', input_shape=(img_size,img_size,3)))  # convolutional layer with activation function included
+    model.add(MaxPooling2D(pool_size=(2, 2)))   # pooling layer
+    model.add(Dropout(0.25))    #dropout to avoid overfitting
+
+    model.add(Conv2D(10, (3, 3), padding='same', activation='relu'))
     model.add(MaxPooling2D(pool_size=(2, 2)))
     model.add(Dropout(0.25))
 
-    model.add(Conv2D(64, (3, 3), padding='same', activation='relu'))
-    # model.add(Conv2D(64, (3, 3), activation='relu'))
-    model.add(MaxPooling2D(pool_size=(2, 2)))
-    model.add(Dropout(0.25))
 
-    # model.add(Conv2D(64, (3, 3), padding='same', activation='relu'))
-    # model.add(Conv2D(64, (3, 3), activation='relu'))
-    # model.add(MaxPooling2D(pool_size=(2, 2)))
-    # model.add(Dropout(0.25))
-
-    model.add(Flatten())
-    model.add(Dense(512, activation='relu'))
+    model.add(Flatten())        #flattening the output of the previous layer to feed it to the fully connected layers
+    model.add(Dense(512, activation='relu'))    
     model.add(Dropout(0.5))
-    if multiclass :
-        model.add(Dense(7, activation='softmax'))
+    if multiclass :     #output of the fully connected layers using softmax to define 1 class only to be labelled 1
+        model.add(Dense(7, activation='softmax'))   
     else:
         model.add(Dense(2, activation='softmax'))
 
@@ -163,23 +165,22 @@ def createModel(multiclass = False):
 
 
 def SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx) :
+    #  helper function called to create, train the SVM with the training set, and use test set to compute the accuracy
     print("\nstarting task %i with SVM" % (filetaskidx))
     print("creating SVM")
-    clf = svm.SVC(kernel="poly", gamma='scale', degree=3)
+    clf = svm.SVC(kernel="poly", gamma='scale', degree=3, C=1)      #creates the SVM
     print("training SVM")
-    clf.fit(X_train, Y_train[:, taskidx])
+    clf.fit(X_train, Y_train[:, taskidx])       #trains the SVM
     print("making predictions")
-    predic = clf.predict(X_test)
+    predic = clf.predict(X_test)        #get prediction on unknown data
     accur = metrics.balanced_accuracy_score(Y_test[:, taskidx], predic)
-    predic_kfold = cross_val_predict(clf, X_test, Y_test[:, taskidx], cv=3)
-    scores = cross_val_score(clf, X_test, Y_test[:, taskidx], cv=3)
     confus = metrics.confusion_matrix(Y_test[:, taskidx], predic)
-    print("accuracy before cross validation = ", accur)  # 31/12/2018 => accuracy = 0.81
+    print("accuracy = ", accur)
     print("confusion matrix : \n", confus)
-    print("mean accuracy after cross validation = ", scores.mean())
-    print("test accuracy after cross validation = ", metrics.balanced_accuracy_score(Y_test[:, taskidx], predic_kfold))
     stoptime = timeit.default_timer()
     print("exec time = ", stoptime - starttime)
+
+    # create CSV file
     csvtitle = "task_%i.csv" % (filetaskidx)
     with open(os.path.join(basedir, csvtitle), 'w', newline='') as myfile:
         wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
@@ -190,19 +191,19 @@ def SVM_solve_task(X_train, X_test, Y_train, Y_test, taskidx, filetaskidx) :
 
 
 def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN, Y_valid_CNN,taskidx, filetaskidx) :
-    # taskidx = 1
+    #  helper function called to create, compile and train the CNN with the training and validation sets, and plot the accuracy and loss functions
     print("CNN model creation")
-    if filetaskidx != 5:
+    if filetaskidx != 5:            #creates the CNN by stacking up the required layers
         model1 = createModel()
     else :
         model1 = createModel(multiclass = True)
     print("CNN model done")
-    batch_size = 60
-    epochs = 3
-    model1.compile(optimizer='rmsprop', loss='binary_crossentropy', metrics=['accuracy'])
+    batch_size = 200
+    epochs = 50
+    model1.compile(optimizer='rmsprop', loss='categorical_crossentropy', metrics=['accuracy'])      #compiles the CNN by assigning it with weights, optimizer and loss functions
 
 
-    if filetaskidx != 5 :
+    if filetaskidx != 5 :       
         nb_classes = np.max(Y_train_CNN[:, taskidx].astype(int)) + 1
         Y_train_CNN_task = Y_train_CNN[:,taskidx].clip(min=0)
         Y_valid_CNN_task = Y_valid_CNN[:,taskidx].clip(min=0)
@@ -222,14 +223,14 @@ def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN,
     Y_valid_CNN_task = np_utils.to_categorical(Y_valid_CNN_task, nb_classes)
     Y_test_CNN_task = np_utils.to_categorical(Y_test_CNN_task, nb_classes)
     history = model1.fit(X_train_CNN, Y_train_CNN_task, batch_size=batch_size, epochs=epochs, verbose=1,
-                         validation_data=(X_valid_CNN, Y_valid_CNN_task))
+                         validation_data=(X_valid_CNN, Y_valid_CNN_task))       #trains the CNN
     print("\nCNN model evaluation")
-    predic_CNN = model1.predict(X_test_CNN)
+    predic_CNN = model1.predict(X_test_CNN)     #get prediction on unknown data
     if filetaskidx != 5:
         predic_CNN = np.asarray([np.argmax(y, axis=None, out=None) for y in predic_CNN]) - 1
     else :
         predic_CNN = np.asarray([np.argmax(y, axis=None, out=None) for y in predic_CNN])
-    mod_eval = model1.evaluate(X_test_CNN, Y_test_CNN_task)
+    mod_eval = model1.evaluate(X_test_CNN, Y_test_CNN_task)     #evaluate average accuracy of the model based on validation accuracy.
     eval_accur = mod_eval[1]
 
     confus = metrics.confusion_matrix(Y_test_CNN[:, taskidx], predic_CNN)
@@ -238,6 +239,27 @@ def CNN_solve_task(X_train_CNN, X_test_CNN, X_valid_CNN,Y_train_CNN, Y_test_CNN,
     stoptime = timeit.default_timer()
     print("exec time = ", stoptime - starttime)
 
+    # Loss Curves
+    plt.figure(figsize=[8, 6])
+    plt.plot(history.history['loss'], 'r', linewidth=3.0)
+    plt.plot(history.history['val_loss'], 'b', linewidth=3.0)
+    plt.legend(['Training loss', 'Validation Loss'], fontsize=18)
+    plt.xlabel('Epochs ', fontsize=16)
+    plt.ylabel('Loss', fontsize=16)
+    plt.title('Loss Curves', fontsize=16)
+    plt.show()
+
+    # Accuracy Curves
+    plt.figure(figsize=[8, 6])
+    plt.plot(history.history['acc'], 'r', linewidth=3.0)
+    plt.plot(history.history['val_acc'], 'b', linewidth=3.0)
+    plt.legend(['Training Accuracy', 'Validation Accuracy'], fontsize=18)
+    plt.xlabel('Epochs ', fontsize=16)
+    plt.ylabel('Accuracy', fontsize=16)
+    plt.title('Accuracy Curves', fontsize=16)
+    plt.show()
+
+    #create CSV file
     csvtitle = "task_%i.csv" % (filetaskidx)
     with open(os.path.join(basedir, csvtitle), 'w', newline='') as myfile:
         wr = csv.writer(myfile, quoting=csv.QUOTE_ALL)
@@ -298,7 +320,7 @@ if not os.path.isdir(os.path.join(basedir, "outliers")):
 
 #=======================================================================================================================
 #Task A: face detection to remove outliers
-#tests with different methods for face detection: SSIM, HAAR cascade and HOG => HOG seems most accurate with acc = 95%
+#tests with different methods for face detection: SSIM, HAAR cascade and HOG => HOG seems most accurate with acc = 92%
 
 outliers_real = np.sort(get_real_outliers(imglabels))
 if os.path.isfile(os.path.join(basedir,"outliers.npy")) :
